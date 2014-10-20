@@ -9,8 +9,6 @@
 #include <arpa/inet.h>
 #include <sstream>
 #include <signal.h>
-#include <vector>
-#include <pthread.h>
 
 #define SOCK_PORT 10914
 #define MAX_CHAR  512
@@ -22,23 +20,16 @@ struct sockaddr_in serv_addr;
 int sock_stat;
 int bind_stat;
 int conn_stat;
-char *in_usr_nm;
-char *out_usr_nm;
 
 char* getUsrNm();
-int getChoice();
-vector<string> getActiveUsers();
-int beginChat();
-int validateUserName(string usr_nm, vector<string> usersList);
-void* writeMsg();
-void exitApp(sig_t sig);
 
 int main(int argc, char* argv[]){
 
 	char *serv_ip_addr;
+	char *usr_nm;
 	
-	pthread_t thr1, thr2;
-	signal(SIGTSTP,(void *)exitApp);
+	pthread_t t1,t2;
+
 	if(argc != 2){
 		cout << "Pass Server IP address as an input argument\n";
 		cout << "Ex: ./a.out <ip_addr>\n";
@@ -89,16 +80,34 @@ int main(int argc, char* argv[]){
 		cout << "Unable to receive message to server. Retry.\n\n";
 	}
 	cout << "Test message from server: " << rcvBuffer << "\n";
-	in_usr_nm = getUsrNm();	// Read username
+	usr_nm = getUsrNm();	// Read username
 	if(!usr_nm){
 		return (0);
 	}
-	cout << "Username \"" << usr_nm << "\" approved by server\n";
+	cout << "Username " << usr_nm << " approved by server\n";
+	bool tempflag = false;
+	while(!tempflag){
 
-	//thread to send writeMsg
-	pthread_create(&thr1, NULL, (void *)writeMsg, (void *)sock_stat);
-	//thread to receive fetchMsg
-	
+		switch(getChoice()){
+			case 1: if(getActiveUsers() == -1){
+					close(sock_stat);
+					exit(1);
+				}
+				cout << "\n\n";
+				break;
+			case 2: //TODO
+				if(getActiveUsers() == -1){
+					close(sock_stat);
+					exit(1);
+				}
+				break;
+			case 3: tempflag = true;
+				cout << "Thank You!\n";
+				break;
+			default: "Enter a valid option.\n";
+				 break;
+		}
+	}
 	cout << "Socket connection closed\n";
 	close(sock_stat);
 	return (0);
@@ -136,7 +145,7 @@ char* getUsrNm(){
 			continue;
 		}
 	}
-	strcpy(usr_nm, msg_rcv->payload);
+	usr_nm = msg_rcv->payload;
 	free(msg_send);
 	free(msg_rcv);
 	if(retryCount == 5){
@@ -158,11 +167,10 @@ int getChoice(){
 	return choice;
 }
 
-vector<string> getActiveUsers(){
+int getActiveUsers(){
 	cout << "Retrieving list of active users...\n";
 	MESSAGE msg_send;
 	MESSAGE msg_rcv;
-	vector<string> usersList;
 	
 	msg_send->msg_type = 2;
 	
@@ -170,45 +178,41 @@ vector<string> getActiveUsers(){
 		cout << "Unable to send message to server. Retry.\n\n";
 		free(msg_send);
 		free(msg_rcv);
-		exit(1);
+		return -1;
 	}
 	if(recv(sock_stat, msg_rcv, sizeof(msg_rcv), 0) == -1){
 		cout << "Unable to receive message to server. Retry.\n\n";
 		free(msg_send);
 		free(msg_rcv);		
-		exit(1);
+		return -1;
 	}
-	if(!msg_rcv->payload){
-		cout << "No active users at this time."
+	
+	if(!msg_rcv || !msg_rcv->payload){
+		cout << "Error while processing the request\n";
 		free(msg_send);
 		free(msg_rcv);
-		return usersList;
-	}else{
-		istringstream msg(msg_rcv->payload);
-		string s;
-		cout << "\n********** List of Active Users **********\n";
-		while(getline(msg,s,'$')){
-			cout << "\t" << s;
-			usersList.push_back(s);
-		}
+		return -1;
 	}
+	
+	istringstream msg(msg_rcv->payload);
+	string s;
+	cout << "\n********** List of Active Users **********\n";
+	while(getline(msg,s,'$'))
+		cout << "\t" << s;
 	cout << "\n";
 	free(msg_send);
 	free(msg_rcv);
-	return usersList;	
+	return 0;	
 }
 
 int beginChat(){
 	int choice = 0;
 	bool loopExit = false;
-	vector<string> usersList;
-	MESSAGE msg_send;
-	MESSAGE msg_rcv;
+	char* usr_nm;
 	while(!loopExit){
-		usersList = getActiveUsers();
-		if(!usersList || !usersList.size()){
-			cout << "No active users available at this time. Returning to main menu.\n";
-			return 0;
+		if(getActiveUsers() == -1){
+			close(sock_stat);
+			exit(1);
 		}
 		cout << "Enter choice:\n";
 		cout << "\t1: Enter username to begin chat\n";
@@ -216,97 +220,28 @@ int beginChat(){
 		cin  >> choice;
 		switch(choice){
 			case 1:	cout << "Enter username:\t";
-				cin >> out_usr_nm;
+				loopExit = true;
+				cin >> usr_nm;
 				cout << "\n";
 				break;
 			case 2:	return 0;
 			default: cout << "Enter the right choice (1 or 2)\n";
 				break;
 		}
-		if(!validateUserName(out_usr_nm, usersList))
-			cout << "Invalid username entered. Please enter the valid username listed below:\n";
-		else
-			loopExit = true;
-			
 	}
-	//msg_send->msg_type = 3;
-	//strcpy(msg_send->payload, in_usr_nm + "$" + out_usr_nm);
 	return 0;
-}
-
-int validateUserName(string usr_nm, vector<string> usersList){
-	if(find(usersList.begin(),usersList.end(),usr_nm) != usersList.end())
-		return 1;
-	else
-		return 0;
 }
 
 
 void* writeMsg(){
 	MESSAGE msg_send;
-	//char buf_msg[MAX_CHAR];
-	bool tempflag;
-	while(1){
-		tempflag = false;
-		while(!tempflag){
-
-			switch(getChoice()){
-				case 1: getActiveUsers();
-					cout << "\n\n";
-					break;
-				case 2: beginChat();
-					tempflag = true;
-					break;
-				case 3: cout << "Thank You!\n";
-					return;
-					break;
-				default: "Enter a valid option.\n";
-				 	break;
-			}
-		}
-		cout << "Sending request to user \"" << out_usr_nm "\"... \n" ;
-		msg_send->msg_type = 3;
-		strcpy(msg_send->payload, in_usr_nm + "$" + out_usr_nm);
-		if(send(sock_stat, msg_send, sizeof(msg_send),0) == -1){
-			cout << "Unable to send message to server. Retry.\n\n";
-			free(msg_send);
-			free(msg_rcv);
-			exit(1);
-		}
-		if(recv(sock_stat, msg_rcv, sizeof(msg_rcv), 0) == -1){
-			cout << "Unable to receive message to server. Retry.\n\n";
-			free(msg_send);
-			free(msg_rcv);		
-			exit(1);
-		}
-		if(!strcmp(msg_rcv->payload,"ACCEPT")){
-			cout << "Request accepted...\n";
-			while(1){
-				cout << in_usr_nm << ":";
-				msg_send->msg_type = 1;
-				fgets(msg_send->payload, MAX_CHAR-1, stdin);
-				cout << "\n";
-				send(sock_stat, msg_send, sizeof(msg_send), 0);
-				bzero(msg_send->payload, MAX_CHAR);
-			}
-		}else if(!strcmp(msg_rcv->payload,"DENY")){
-			int ip;
-			cout << "Request denied by " << out_usr_nm << "\n";
-			cout << "Enter \'1\' to return to main menu else any other number to exit.\n";
-			cin >> ip;
-			if(ip != 1)
-				break;
-			else
-				continue;
-		}
-	}
-	pthread_exit((void* )0);
+	char buf_msg[MAX_CHAR];
+	msg_send->msg_type = 1;
+	fgets(buf_msg,MAX_CHAR-1,stdin);
 }
 
-
-void* exitApp(sig_t sig){
-	cout << "Chat session ended\n";
-	//TODO send msg to server that the client has exited out of the chat room.
+void exitApp(sig_t sig){
+	cout << "Exiting from the application\n";
 	close(sock_stat);
 	exit(0);
 }
